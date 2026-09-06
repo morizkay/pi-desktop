@@ -235,5 +235,56 @@ test("harness fixture validates fork IDs, approval channel, failed drafts and se
   );
   expect(prompt.args.message).toContain("> @@ -1 +1 @@");
   expect(prompt.args.message).toContain("Please review this hunk");
+
+  await page.evaluate(() => {
+    const w = window as any;
+    w.__emit({
+      type: "extension_ui_request",
+      id: "pending-navigation",
+      method: "confirm",
+      title: "Pending navigation approval",
+      message: "This must stay actionable outside the session inspector.",
+    });
+  });
+  await expect(
+    page.getByRole("heading", { name: "Pending navigation approval" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Tasks", exact: false }).click();
+  const pending = page.locator('[aria-label="Pending extension requests"]');
+  await expect(pending).toBeVisible();
+  await pending.getByRole("button", { name: "Confirm", exact: true }).click();
+  const pendingResponse = await page.evaluate(() =>
+    (window as any).__calls.find(
+      (c: any) =>
+        c.command === "pi_extension_response" &&
+        c.args.response.id === "pending-navigation",
+    ),
+  );
+  expect(pendingResponse.args.response.confirmed).toBe(true);
+
+  await page.evaluate(() => {
+    (window as any).__emit({
+      type: "extension_ui_request",
+      id: "timed-out",
+      method: "confirm",
+      title: "Timed request",
+      timeout: 20,
+    });
+  });
+  await expect(page.getByRole("heading", { name: "Timed request" })).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          () =>
+            (window as any).__calls.find(
+              (c: any) =>
+                c.command === "pi_extension_response" &&
+                c.args.response.id === "timed-out",
+            )?.args.response,
+        ),
+      { timeout: 1000 },
+    )
+    .toMatchObject({ id: "timed-out", cancelled: true });
   expect(errors).toEqual([]);
 });

@@ -9,6 +9,7 @@
   let value = $state("");
   let error = $state("");
   let busy = $state(false);
+  let finished = false;
   const id = $derived(String(request.id));
   const options = $derived(
     Array.isArray(request.options)
@@ -19,14 +20,16 @@
     value =
       typeof request.prefill === "string" ? request.prefill : options[0] || "";
     if (typeof request.timeout === "number") {
-      const timer = setTimeout(() => ondone(id), Math.max(0, request.timeout));
+      const timer = setTimeout(() => void respond({ cancelled: true }), Math.max(0, request.timeout));
       return () => clearTimeout(timer);
     }
   });
   async function respond(data: JsonRecord) {
+    if (busy || finished) return;
     busy = true;
     try {
       await piExtensionResponse({ id, ...data });
+      finished = true;
       ondone(id);
     } catch (e) {
       error = String(e);

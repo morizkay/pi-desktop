@@ -33,12 +33,15 @@
       const selected = new Set(catalog.filter(m=>inModelScope(m.provider,m.id,scoped)).map(m=>`${m.provider}/${m.id}`));
       // Preserve explicit IDs absent from today's catalog rather than deleting them.
       for (const pattern of scoped) if (!pattern.includes('*') && !pattern.includes('?')) selected.add(pattern);
-      if (enabled) selected.add(`${p}/${id}`); else { selected.delete(`${p}/${id}`); selected.delete(id); }
+      if (enabled) selected.add(`${p}/${id}`); else {
+        selected.delete(`${p}/${id}`); selected.delete(id);
+        for (const pattern of scoped) if (inModelScope(p, id, [pattern])) selected.delete(pattern);
+      }
       if (!selected.size) throw new Error('Keep at least one model enabled, or use All models. Pi treats an empty scope as all models.');
       await piSaveEnabledModels([...selected]); settings = await piReadSettings(); saved = 'Model scope saved. Console picker uses it on return; Pi cycling applies it on its next startup.';
     });
   }
-  async function check(source?: string) { const result = await piCheckUpdate(source); updates = {...updates, [source || 'harness']:result}; }
+  async function check(source?: string) { const result = await piCheckUpdate(source); updates = {...updates, [source || 'harness']:result}; return result; }
   onMount(() => { desktop = hasDesktop(); if(desktop) void action('Loading configuration…', load); });
 </script>
 
@@ -76,7 +79,7 @@
     </section>
     <section class="wide"><h2>Extensions & packages</h2><p>Packages execute with full system access. Review source before installing. Update checks contact the public npm registry only when you click Check. Pinned, git and local sources are never reported as up to date without verification.</p>
       <div class="row"><input aria-label="Package source" bind:value={source} placeholder="npm:package or git:host/repository"/><button class="primary" disabled={!source.trim()} onclick={()=>{if(confirm('Install this package with full system access?')) void action('Installing…',async()=>{const s=source.trim();await piPackageInstall(/^(npm:|git:|https?:|ssh:|\/|\.\/|\.\.\/)/.test(s)?s:`npm:${s}`);source='';await load();});}}>Install</button></div>
-      {#each settings?.packages || [] as pkg}<div class="package"><div class="row"><strong>{pkg}</strong><button onclick={()=>action('Checking version…',()=>check(pkg))}>Check</button>{#if updates[pkg]?.available}<button class="primary" onclick={()=>action('Updating…',async()=>{await piPackageUpdate(pkg);await check(pkg);saved='Update command completed; version rechecked. Restart Pi Console to load package changes.';})}>Update</button>{/if}<button onclick={()=>{if(confirm(`Remove ${pkg}?`)) void action('Removing…',async()=>{await piPackageRemove(pkg);await load();});}}>Remove</button></div>{#if updates[pkg]}<p>{updates[pkg].installed || 'Unknown installed version'}{updates[pkg].latest ? ` → ${updates[pkg].latest}` : ''} · {updates[pkg].note}</p>{/if}</div>{:else}<p>No configured packages.</p>{/each}
+      {#each settings?.packages || [] as pkg}<div class="package"><div class="row"><strong>{pkg}</strong><button onclick={()=>action('Checking version…',()=>check(pkg))}>Check</button>{#if updates[pkg]?.available}<button class="primary" onclick={()=>action('Updating…',async()=>{const before=updates[pkg]?.installed;const result=await piPackageUpdate(pkg);if(!result.success) throw new Error(result.stderr || result.stdout || 'Package update command failed.');const after=await check(pkg);if(!after.installed || (before && after.installed===before)) throw new Error(`Update did not change the installed version${after.installed ? ` (still ${after.installed})` : ''}.`);saved='Update verified; restart Pi Console to load package changes.';})}>Update</button>{/if}<button onclick={()=>{if(confirm(`Remove ${pkg}?`)) void action('Removing…',async()=>{await piPackageRemove(pkg);await load();});}}>Remove</button></div>{#if updates[pkg]}<p>{updates[pkg].installed || 'Unknown installed version'}{updates[pkg].latest ? ` → ${updates[pkg].latest}` : ''} · {updates[pkg].note}</p>{/if}</div>{:else}<p>No configured packages.</p>{/each}
     </section>
     <section class="wide"><h2>Pi harness</h2><p>Check installed Pi against the official latest release. Upgrades remain an explicit terminal action using your installation channel.</p><button onclick={()=>action('Checking Pi version…',()=>check())}>Check harness update</button>{#if updates.harness}<p role="status"><strong>{updates.harness.available?'Update available':'Version check'}</strong> · Installed {updates.harness.installed || 'unknown'} · Latest {updates.harness.latest || 'unknown'}</p><p>{updates.harness.note}</p>{/if}</section>
   </fieldset>

@@ -1,6 +1,8 @@
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::{collections::VecDeque, io::{Read, Write}, sync::{Arc, Mutex, Condvar, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc}, thread, time::Duration};
+#[cfg(unix)]
+use std::process::Command;
 use tauri::State;
 
 const CAPACITY: usize = 256 * 1024;
@@ -32,6 +34,11 @@ impl Terminal {
         #[cfg(unix)] unsafe {
             // Only signal groups belonging to this explicitly opened PTY, not the app's group.
             let own = libc::getpgrp();
+            if let Some(pid) = self.pid {
+                for descendant in descendant_processes(pid as i32) {
+                    if descendant > 1 { libc::kill(descendant, libc::SIGKILL); }
+                }
+            }
             if let Some(group) = self.master.process_group_leader() {
                 if group > 1 && group != own { libc::kill(-group, libc::SIGKILL); }
             }
@@ -41,6 +48,18 @@ impl Terminal {
         }
         let _ = self.reaped.recv_timeout(Duration::from_secs(2));
     }
+}
+#[cfg(unix)]
+fn descendant_processes(root: i32) -> Vec<i32> {
+    let mut pending = vec![root]; let mut descendants = Vec::new();
+    while let Some(parent) = pending.pop() {
+        let parent = parent.to_string();
+        let Ok(output) = Command::new("/usr/bin/pgrep").args(["-P", &parent]).output() else { continue; };
+        for child in String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| line.trim().parse::<i32>().ok()) {
+            if child > 1 { descendants.push(child); pending.push(child); }
+        }
+    }
+    descendants.reverse(); descendants
 }
 impl Drop for Terminal { fn drop(&mut self) { self.close(); } }
 impl Terminals {
@@ -120,5 +139,16 @@ pub async fn terminal_close(state:State<'_,Arc<Terminals>>,id:u64)->Result<(),St
         let mut output=Vec::new();let mut eof=false;
         for _ in 0..100 {thread::sleep(Duration::from_millis(20));let slot=manager.0.lock().unwrap();let term=slot.as_ref().unwrap();let mut out=term.output.0.lock().unwrap();output.extend(out.bytes.drain(..));term.output.1.notify_all();if out.eof{eof=true;break;}}
         assert!(eof);assert!(String::from_utf8_lossy(&output).contains("pty-test-ok"));manager.close_all();assert!(manager.0.lock().unwrap().is_none());assert!(size(0,0).is_err());
+    }
+    #[cfg(unix)]
+    #[test] fn close_kills_background_process_group_children() {
+        let temp=tempfile::tempdir().unwrap();let marker=temp.path().join("child-survived");let pid_file=temp.path().join("child.pid");let manager=Terminals::default();
+        let started=manager.start(temp.path().to_string_lossy().into_owned(),80,24,CommandBuilder::new("/bin/sh")).unwrap();
+        {let slot=manager.0.lock().unwrap();let term=slot.as_ref().unwrap();term.input.send(format!("(sleep 2; echo survived > '{}') & echo $! > '{}'; wait\n",marker.display(),pid_file.display())).unwrap();}
+        for _ in 0..100 {if pid_file.is_file(){break;}thread::sleep(Duration::from_millis(10));}
+        assert!(pid_file.is_file(),"background child did not start");
+        manager.close_all();
+        thread::sleep(Duration::from_millis(2200));
+        assert!(!marker.is_file(),"background child survived terminal close");assert!(started.id>0);
     }
 }

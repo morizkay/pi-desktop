@@ -390,7 +390,9 @@
     if (locked) throw new Error('Connect and stop the agent before preparing a task.');
     busy = true; saveDraft();
     try {
-      await piNewSession(dir); streaming = ''; await refresh();
+      rpcData(await piNewSession(dir)); streaming = ''; await refresh();
+      if (!sessionId || !sessionPath || !sessions.some((session) => session.path === sessionPath && session.cwd === dir))
+        throw new Error('Pi created a session, but Console could not verify its refreshed identity. The task was not linked.');
       draft = draft ? `${draft}\n\n${title}` : title;
       saveDraft();
       return sessionPath;
@@ -831,6 +833,7 @@
           >Cancel</button
         >
       </form>{/if}
+    {#if navTab !== 'sessions' && requests.length}<div class="pending-requests" aria-label="Pending extension requests">{#each requests as request (String(request.id))}<ExtensionRequest {request} ondone={(id) => (requests = requests.filter((r) => r.id !== id))} />{/each}</div>{/if}
     {#if navTab !== 'sessions'}
       <WorkspacePages view={navTab} {sessions} {cwd} {sessionId} {sessionPath} {sessionName} {stateLabel} {connected} {locked} {repo} {tools} {logs}
         onview={(view) => navTab = view}
@@ -1875,6 +1878,12 @@
   }
   .inspector-content :global(.request) {
     margin: 12px;
+  }
+  .pending-requests {
+    padding: 12px 26px 0;
+  }
+  .pending-requests :global(.request) {
+    margin: 0 0 12px;
   }
   .section-heading {
     display: flex;

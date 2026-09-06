@@ -99,5 +99,12 @@ pub fn pi_remove_custom_provider(provider: String) -> Result<(), String> {
         assert_eq!(read(&p).unwrap()["other"]["keep"], true);
         fs::write(&p, "broken").unwrap(); assert!(patch(&p, |_| Ok(())).is_err()); assert_eq!(fs::read_to_string(&p).unwrap(), "broken");
         fs::create_dir(d.path().join("settings.json.lock")).unwrap(); assert!(patch(&p, |_| Ok(())).is_err());
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            fs::remove_dir(d.path().join("settings.json.lock")).unwrap();
+            fs::write(&p, r#"{}"#).unwrap();
+            patch(&p, |v| { v["secret"] = json!("preserved privately"); Ok(()) }).unwrap();
+            assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        }
     }
 }

@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { validateResult, parseForkMessages } from "../src/lib/pi/protocol";
 import { parseActiveEntries, messageTextFromPi } from "../src/lib/pi/messages";
 import { parseHunks, quoteHunk } from "../src/lib/pi/diff";
+import { parseWorkspaceData } from "../src/lib/pi/tasks";
 
 test("shared transport rejects failed and cancelled envelopes", () => {
   expect(() =>
@@ -90,4 +91,14 @@ test("hunk parser tracks added, removed and context line numbers", () => {
   expect(parseHunks("Binary files a/logo.png and b/logo.png differ")).toEqual(
     [],
   );
+});
+test("workspace storage rejects duplicate task IDs without replacing the saved data", () => {
+  const duplicate = JSON.stringify({
+    workspaces: ["/fixture/project"],
+    tasks: [
+      { id: "same", title: "one", workspace: "/fixture/project", status: "Planned", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "same", title: "two", workspace: "/fixture/project", status: "Completed", updatedAt: "2026-01-01T00:00:01.000Z" },
+    ],
+  });
+  expect(() => parseWorkspaceData(duplicate)).toThrow("was not overwritten");
 });
