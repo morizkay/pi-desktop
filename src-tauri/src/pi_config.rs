@@ -88,7 +88,7 @@ pub fn read_settings() -> Result<PiSettingsView, String> {
         .and_then(|p| p.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|item| package_entry_to_string(item))
+                .filter_map(package_entry_to_string)
                 .collect()
         })
         .unwrap_or_default();
